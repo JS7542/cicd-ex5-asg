@@ -130,6 +130,8 @@ jobs:
               \"echo 'FASTAPI_ECR_REPOSITORY=$FASTAPI_ECR_REPOSITORY' >> $APP_DIR/.env\",
               \"echo 'NGINX_IMAGE_TAG=$NGINX_IMAGE_TAG' >> $APP_DIR/.env\",
               \"echo 'FASTAPI_IMAGE_TAG=$FASTAPI_IMAGE_TAG' >> $APP_DIR/.env\",
+              \"echo 'NGINX_IMAGE_TAG=$NGINX_IMAGE_TAG' >> $APP_DIR/.env\",
+              \"echo 'FASTAPI_IMAGE_TAG=$FASTAPI_IMAGE_TAG' >> $APP_DIR/.env\",
 
               \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
 
