@@ -56,13 +56,11 @@ jobs:
             --targets "Key=tag:Cicd,Values=asg" \
             --parameters  "commands =[
               \"aws ecr get-login-password --region ap-east-1 | docker login --username AWS --password-stdin 925047940866.dkr.ecr.ap-east-1.amazonaws.com\",
-              \"docker stop nginx_container || true\",
-              \"docker rm nginx_container || true\",
               \"aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/docker-compose.yaml ./docker-compose.yaml\",
-              \"docker compose pull\",
-              \"docker compose down || true\",
-              \"docker compose up -d --remove-orphans\",
-              \"docker image prune -f\"
+              \"sudo docker compose pull\",
+              \"sudo docker compose down || true\",
+              \"sudo docker compose up -d --remove-orphans\",
+              \"sudo docker image prune -f\"
             ]" \
             --region "${{ secrets.AWS_REGION }}" \
             --comment "Deploy nginx Docker container and sync S3 bucket to nginx html directory"
