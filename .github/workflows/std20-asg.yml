@@ -14,7 +14,8 @@ env:
   ECR_REGISTRY: 925047940866.dkr.ecr.ap-east-1.amazonaws.com
   ECR_REPOSITORY: nginx
 
-  IMAGE_TAG: 1.31.3-ecr
+  NGINX_IMAGE_TAG: 1.31.3-ecr
+  FASTAPI_IMAGE_TAG: 1.0.0-ecr
 
   S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
 
@@ -73,15 +74,30 @@ jobs:
         run: |
           docker build \
             --no-cache \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$NGINX_IMAGE_TAG \
             ./nginx
 
+          docker build \
+            --no-cache \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$FASTAPI_IMAGE_TAG \
+            ./fastapi
+
           docker tag \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$FASTAPI_IMAGE_TAG \
             $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
           docker push \
-            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+            $ECR_REGISTRY/$ECR_REPOSITORY:$FASTAPI_IMAGE_TAG
+
+          docker push \
+            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          docker tag \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$NGINX_IMAGE_TAG \
+            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          docker push \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$NGINX_IMAGE_TAG
 
           docker push \
             $ECR_REGISTRY/$ECR_REPOSITORY:latest
@@ -111,7 +127,8 @@ jobs:
 
               \"echo 'ECR_REGISTRY=$ECR_REGISTRY' > $APP_DIR/.env\",
               \"echo 'ECR_REPOSITORY=$ECR_REPOSITORY' >> $APP_DIR/.env\",
-              \"echo 'IMAGE_TAG=$IMAGE_TAG' >> $APP_DIR/.env\",
+              \"echo 'NGINX_IMAGE_TAG=$NGINX_IMAGE_TAG' >> $APP_DIR/.env\",
+              \"echo 'FASTAPI_IMAGE_TAG=$FASTAPI_IMAGE_TAG' >> $APP_DIR/.env\",
 
               \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
 
