@@ -4,14 +4,43 @@ on:
   push:
     branches: ["main"]
 
-# 2. 작업 정의
+
+# ============================================================
+# 공통 환경변수
+# ============================================================
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+
+  ECR_REGISTRY: 925047940866.dkr.ecr.ap-east-1.amazonaws.com
+  ECR_REPOSITORY: nginx
+
+  IMAGE_TAG: 1.31.3-ecr
+
+  S3_BUCKET: ${{ secrets.S3_BUCKET_NAME }}
+
+  APP_DIR: /opt/std20-app
+  NGINX_LOG_DIR: /home/ec2-user/nginx/logs
+
+
 jobs:
   build-and-update:
-    runs-on: ubuntu-latest    # 실제 작업 주체
+    runs-on: ubuntu-latest
+
     steps:
-      - name: 소스 코드 전송
+
+      # ======================================================
+      # 1. GitHub Repository Checkout
+      # ======================================================
+      - name: 소스 코드 Checkout
         uses: actions/checkout@v4
 
+
+      # ======================================================
+      # 2. Docker Hub Login
+      #
+      # Dockerfile의 FROM nginx 등이 Docker Hub에서
+      # 이미지를 가져오는 경우 사용
+      # ======================================================
       - name: Login to Docker Hub
         uses: docker/login-action@v4
         with:
@@ -19,48 +48,82 @@ jobs:
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
 
-
+      # ======================================================
+      # 3. AWS 인증
+      # ======================================================
       - name: AWS 자격 증명 설정
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      # ECR에 Docker 이미지 빌드 및 푸시
+
+      # ======================================================
+      # 4. ECR Login
+      # ======================================================
       - name: Login to AWS ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-        
-      - name: Build and push Docker image to ECR
-        env:
-        #   ECR_REGISTRY: ${{ secrets.ECR_REGISTRY = 925047940866.dkr.ecr.ap-east-1.amazonaws.com }}
-        #   ECR_REPOSITORY: ${{ secrets.ECR_REGISTRY = nginx }}
-          IMAGE_TAG: 1.31.3-ecr # ${{github.sha}}
-        run: |
-          docker build --no-cache -t 925047940866.dkr.ecr.ap-east-1.amazonaws.com/nginx:$IMAGE_TAG ./nginx
-          docker build --no-cache -t 925047940866.dkr.ecr.ap-east-1.amazonaws.com/nginx:latest ./nginx
 
-          docker push 925047940866.dkr.ecr.ap-east-1.amazonaws.com/nginx:$IMAGE_TAG
-          docker push 925047940866.dkr.ecr.ap-east-1.amazonaws.com/nginx:latest
 
-      - name: S3 도커 컴포즈 받아오기
+      # ======================================================
+      # 5. Docker Image Build & Push
+      # ======================================================
+      - name: Build and Push Docker Image
         run: |
-          aws s3 cp ./docker-compose.yaml s3://${{ secrets.S3_BUCKET_NAME }}/
+          docker build \
+            --no-cache \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            ./nginx
 
-      - name: Docker 컨테이너 배포 및 s3 파일 싱크
+          docker tag \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          docker push \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+          docker push \
+            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+
+      # ======================================================
+      # 6. Docker Compose → S3
+      # ======================================================
+      - name: Docker Compose S3 업로드
         run: |
-          # ECR 에서 이미지 가져오기 및 HTML 파일 동기화
+          aws s3 cp \
+            ./docker-compose.yaml \
+            s3://$S3_BUCKET/docker-compose.yaml
+
+
+      # ======================================================
+      # 7. ASG EC2에 SSM 배포
+      # ======================================================
+      - name: ASG Docker Container 배포
+        run: |
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:Cicd,Values=asg" \
-            --parameters  "commands =[
-              \"aws ecr get-login-password --region ap-east-1 | docker login --username AWS --password-stdin 925047940866.dkr.ecr.ap-east-1.amazonaws.com\",
-              \"aws s3 cp s3://${{ secrets.S3_BUCKET_NAME }}/docker-compose.yaml ./docker-compose.yaml\",
-              \"sudo docker compose pull\",
-              \"sudo docker compose down || true\",
-              \"sudo docker compose up -d --remove-orphans\",
-              \"sudo docker image prune -f\"
+            --parameters "commands=[
+              \"mkdir -p $APP_DIR\",
+              \"mkdir -p $NGINX_LOG_DIR\",
+
+              \"echo 'ECR_REGISTRY=$ECR_REGISTRY' > $APP_DIR/.env\",
+              \"echo 'ECR_REPOSITORY=$ECR_REPOSITORY' >> $APP_DIR/.env\",
+              \"echo 'IMAGE_TAG=$IMAGE_TAG' >> $APP_DIR/.env\",
+
+              \"aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY\",
+
+              \"aws s3 cp s3://$S3_BUCKET/docker-compose.yaml $APP_DIR/docker-compose.yaml\",
+
+              \"docker compose -p std20-app -f $APP_DIR/docker-compose.yaml --env-file $APP_DIR/.env pull\",
+
+              \"docker compose -p std20-app -f $APP_DIR/docker-compose.yaml --env-file $APP_DIR/.env down || true\",
+
+              \"docker compose -p std20-app -f $APP_DIR/docker-compose.yaml --env-file $APP_DIR/.env up -d --remove-orphans\",
+
+              \"docker image prune -f\"
             ]" \
-            --region "${{ secrets.AWS_REGION }}" \
-            --comment "Deploy nginx Docker container and sync S3 bucket to nginx html directory"
+            --region "$AWS_REGION" \
+            --comment "Deploy nginx container to ASG instances"
